@@ -1,5 +1,16 @@
 # KinFitTester
 
+## Install and run
+
+Tested in CMSSW_10_2_18
+
+In `CMSSW_10_2_18/src`:
+
+* `git clone git@github.com:tpmccauley/KinFitTester.git KinFitTester/KinFitTester`
+* `scram b`
+* You may have to init your GRID proxy `voms-proxy-init --rfc --voms cms`
+* `cmsRun KinFitTester/KinFitTester/test/KinFitTest_cfg.py`
+
 ## to-do
 
 * Sensible fits
