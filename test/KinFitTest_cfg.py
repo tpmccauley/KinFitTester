@@ -25,6 +25,7 @@ process.options.allowUnscheduled = cms.untracked.bool(True)
 process.source = cms.Source ("PoolSource",
     fileNames = cms.untracked.vstring(
     'root://xrootd-cms.infn.it//store/data/Run2018A/Charmonium/MINIAOD/PromptReco-v2/000/316/239/00000/08BFAB4F-1359-E811-B01F-FA163E5285EC.root'
+    #'/store/mc/RunIISummer17MiniAOD/BsToJpsiPhi_BMuonFilter_TuneCUEP8M1_13TeV-pythia8-evtgen/MINIAODSIM/NZSFlatPU28to62_92X_upgrade2017_realistic_v10-v1/150000/B8DB27C5-57AC-E711-9112-FA163E7B5756.root'
     )
 
 )

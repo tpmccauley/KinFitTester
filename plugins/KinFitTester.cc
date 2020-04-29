@@ -43,6 +43,8 @@
 #include "RecoVertex/KinematicFitPrimitives/interface/RefCountedKinematicParticle.h"
 #include "RecoVertex/KinematicFitPrimitives/interface/RefCountedKinematicTree.h"
 
+#include "DataFormats/PatCandidates/interface/PackedGenParticle.h"
+
 #include <iostream>
 
 using namespace reco;
@@ -64,11 +66,15 @@ private:
   virtual void endJob() override;
   
   edm::InputTag patMuonInputTag_;
+  edm::InputTag patGenParticleInputTag_;
+
+  bool isMC_;
 
   double ptMin_;
   double etaMax_;
 
   edm::EDGetTokenT<std::vector<pat::Muon> > patMuonToken_;
+  edm::EDGetTokenT<pat::PackedGenParticleCollection> patGenParticleToken_;
 
   bool isGoodMuon(const pat::Muon& muon);
 
@@ -88,12 +94,13 @@ private:
 
 KinFitTester::KinFitTester(const edm::ParameterSet& iConfig)
   : patMuonInputTag_(iConfig.getParameter<edm::InputTag>("patMuonTag")),
+    patGenParticleInputTag_(iConfig.getParameter<edm::InputTag>("patGenParticleTag")),
+    isMC_(false),
     ptMin_(iConfig.getParameter<double>("ptMin")),
     etaMax_(iConfig.getParameter<double>("etaMax"))
 {
-
   patMuonToken_ = consumes<std::vector<pat::Muon> >(patMuonInputTag_);
-
+  patGenParticleToken_ = consumes<pat::PackedGenParticleCollection>(patGenParticleInputTag_);
 }
 
 KinFitTester::~KinFitTester()
@@ -103,9 +110,28 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 {
   edm::Handle<std::vector<pat::Muon> > pat_muons;
   iEvent.getByToken(patMuonToken_, pat_muons);
-
   std::cout<< pat_muons->size() << " pat::Muons in the event" <<std::endl;
 
+  if ( isMC_ ) 
+  {
+    edm::Handle<pat::PackedGenParticleCollection> gen_particles;
+    iEvent.getByToken(patGenParticleToken_, gen_particles);
+    std::cout<< gen_particles->size() <<" pat::PackedGenParticles in the event"<<std::endl;
+
+    unsigned int n_gen_muons = 0;
+
+    for ( pat::PackedGenParticleCollection::const_iterator gp = gen_particles->begin();
+          gp != gen_particles->end(); ++gp ) 
+    {
+      if ( abs(gp->pdgId()) == 13 )
+      {
+        n_gen_muons++;    
+      } 
+    }
+
+    std::cout<< n_gen_muons <<" PackedGenParticles are muons"<<std::endl;
+  }
+  
   edm::ESHandle<TransientTrackBuilder> ttb;
   iSetup.get<TransientTrackRecord>().get("TransientTrackBuilder", ttb);
 
@@ -174,6 +200,7 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   */
   KinematicParticleVertexFit(muons, kaons);
 
+  KinematicParticleVertexFit(particles);
 }
 
 bool KinFitTester::isGoodMuon(const pat::Muon& muon) 
@@ -214,17 +241,27 @@ void KinFitTester::KinematicConstrainedVertexFit(std::vector<RefCountedKinematic
   MultiTrackKinematicConstraint* constraint = new TwoTrackMassKinematicConstraint(JPsi_mass);
 
   KinematicConstrainedVertexFitter kcv_fitter;
+
+  try 
+  {  
+    RefCountedKinematicTree tree = kcv_fitter.fit(particles, constraint);
   
-  RefCountedKinematicTree tree = kcv_fitter.fit(particles, constraint);
-  
-  std::cout<<"KinematicTree from KCVF:"<<std::endl;
-  printout(tree);
+    std::cout<<"KinematicTree from KCVF:"<<std::endl;
+    printout(tree);
+  }
+  catch (const std::exception& e) 
+  {
+    std::cout<<"exception thrown in KCVF "<< e.what() <<std::endl;
+    return;
+  }  
 }
 
 void KinFitTester::KinematicParticleVertexFit(std::vector<RefCountedKinematicParticle> particles)
 {
   KinematicParticleVertexFitter kpv_fitter;
   RefCountedKinematicTree tree = kpv_fitter.fit(particles);
+  
+  std::cout<<"KinematicTree from KPVF w/o constraints"<<std::endl;
   printout(tree);
 }
 
@@ -238,28 +275,35 @@ void KinFitTester::KinematicParticleVertexFit(std::vector<RefCountedKinematicPar
     - Fit the J/psi and the K to a common vertex, reconstructing the B parameters
   */
 
-  // The vertex fitter
-  KinematicParticleVertexFitter kpv_fitter;
+  try 
+  {
+    // The vertex fitter
+    KinematicParticleVertexFitter kpv_fitter;
   
-  RefCountedKinematicTree tree = kpv_fitter.fit(muons);
+    RefCountedKinematicTree tree = kpv_fitter.fit(muons);
 
-  // The particle fitter
-  KinematicParticleFitter kp_fitter;
+    // The particle fitter
+    KinematicParticleFitter kp_fitter;
 
-  ParticleMass JPsi_mass = 3.09687;
-  KinematicConstraint* constraint = new MassKinematicConstraint(JPsi_mass, 0.00004);
+    ParticleMass JPsi_mass = 3.09687;
+    KinematicConstraint* constraint = new MassKinematicConstraint(JPsi_mass, 0.00004);
 
-  tree = kp_fitter.fit(constraint, tree);
+    tree = kp_fitter.fit(constraint, tree);
 
-  tree->movePointerToTheTop();
-  RefCountedKinematicParticle JPsi_particle = tree->currentParticle();
-  kaons.push_back(JPsi_particle); // Push this to this?
+    tree->movePointerToTheTop();
+    RefCountedKinematicParticle JPsi_particle = tree->currentParticle();
+    kaons.push_back(JPsi_particle); // Push this to this?
 
-  RefCountedKinematicTree btree = kpv_fitter.fit(kaons);
+    RefCountedKinematicTree btree = kpv_fitter.fit(kaons);
 
-  std::cout<<"KinematicTree from KPVF:"<<std::endl;
-  printout(btree);
-
+    std::cout<<"KinematicTree from KPVF:"<<std::endl;
+    printout(btree);
+  }
+  catch (const std::exception& e) 
+  {
+    std::cout<<"exception thrown in KPVF "<< e.what() <<std::endl;
+    return;
+  }
 }
 
 void KinFitTester::printout(const RefCountedKinematicVertex& vertex) const
@@ -270,22 +314,54 @@ void KinFitTester::printout(const RefCountedKinematicVertex& vertex) const
     return;
   } 
 
-  std::cout<< "    Decay vertex:" 
-           << vertex->position() << vertex->chiSquared() <<" " 
-           << vertex->degreesOfFreedom() <<std::endl;
+  std::cout<< "   Decay vertex:" 
+           << vertex->position() 
+           << "chi2/ndf = "
+           << vertex->chiSquared() <<"/"<< vertex->degreesOfFreedom() <<std::endl;
 }
 
 void KinFitTester::printout(const RefCountedKinematicParticle& particle) const
 {
   std::cout<< "   Particle:"<<std::endl;
 
-  //AlgebraicVector7 par = particle->currentState().kinematicParameters().vector();
-  //AlgebraicSymMatrix77 err = particle->currentState().kinematicParametersError().matrix();
+  /*
+    The 7 parameters
+    - (x,y,z): reference position in the global frame
+    - (px, py, pz): particle momentum at reference position
+    - m: particle mass
+
+    typedef ROOT::Math::SVector<double, 7> AlgebraicVector7
+
+    AlgebraicVector7 particle->currentState().kinematicParameters().vector();
+
+
+    The 7x7 covariance matrix
+    
+    AlgebraicSymMatrix77 particle->currentState().kinematicParametersError().matrix();
+  */
+
+  double x,y,z;
+  double px, py, pz;
+  double m;
+
+  AlgebraicVector7 pars = particle->currentState().kinematicParameters().vector();
+  
+  x = pars[0];
+  y = pars[1];
+  z = pars[2];
+
+  px = pars[3];
+  py = pars[4];
+  pz = pars[5];
+
+  m = pars[6];
 
   std::cout<< "     Momentum at vertex:" << particle->currentState().globalMomentum() <<std::endl;
-  std::cout<< "     Parameters at vertex:" 
-           << particle->currentState().kinematicParameters().vector() <<" " 
-           << particle->currentState().kinematicParametersError().matrix() <<std::endl;
+  std::cout<< "     Parameters at vertex: "
+           <<"(x,y,z) = ("<< x <<","<< y <<","<< z <<") "
+           <<"(px,py,pz) = ("<< px <<","<< py <<","<< pz <<") "
+           <<"m = "<< m 
+           <<std::endl;
 }
 
 void KinFitTester::printout(const RefCountedKinematicTree& tree) const
