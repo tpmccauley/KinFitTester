@@ -2,6 +2,7 @@ import FWCore.ParameterSet.Config as cms
 
 KinFitTester = cms.EDAnalyzer('KinFitTester',
                               patMuonTag = cms.InputTag("slimmedMuons"),
+                              packedCandidateTag = cms.InputTag("packedPFCandidates"),
                               prunedGenParticleTag = cms.InputTag("prunedGenParticles"),
                               packedGenParticleTag = cms.InputTag("packedGenParticles"),
                               isMC = cms.bool(False),
