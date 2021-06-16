@@ -205,12 +205,13 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
     }
     */
     
-    
+   
     if ( cands.size() != 4 )
       return;
 
     std::cout<<"Muons and PackedCandidates:"<<std::endl;
 
+   
     //  Match the candidates to the Muons and PackedCandidates
     for ( auto cand: cands )
     {
@@ -219,51 +220,61 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
         for ( std::vector<pat::Muon>::const_iterator m = pat_muons->begin(), mend = pat_muons->end();
               m != mend; ++m ) 
         {   
-          if ( deltaR(m->eta(), m->phi(), cand->eta(), cand->phi()) > 0.02 )
-            continue;
-
-          if ( m->innerTrack().isNonnull() && 
-               isGoodMuon(*m) && 
-               inKinematicAcceptanceRegion(*m) )
+          if ( (m->charge() == cand->charge()) &&       
+               (deltaR(m->eta(), m->phi(), cand->eta(), cand->phi()) < 0.01) &&
+               (fabs((m->pt() - cand->pt()) / cand->pt()) < 0.1 )  
+            )
           {
-            std::cout<<"id, pt eta, phi: "
-                     << cand->pdgId() <<", "
-                     << cand->pt() <<", "
-                     << cand->eta() <<", "
-                     << cand->phi() <<std::endl;
+            if ( m->innerTrack().isNonnull() && 
+                 isGoodMuon(*m) && 
+                 inKinematicAcceptanceRegion(*m) )
+            {
+              std::cout<<"id, pt eta, phi: "
+                       << cand->pdgId() <<", "
+                       << cand->pt() <<", "
+                       << cand->eta() <<", "
+                       << cand->phi() <<std::endl;
             
-            tracks.push_back(m->innerTrack().get());
-            ttrks.push_back((*ttb).build(m->innerTrack().get()));
+              tracks.push_back(m->innerTrack().get());
+              ttrks.push_back((*ttb).build(m->innerTrack().get()));
+              //ttrks.push_back((*ttb).build(m->originalObject()->clone()));
+            }
           }
+          
           
         }
       }
-      
+    
+     
       if ( abs(cand->pdgId()) == 321 || abs(cand->pdgId()) == 13 )
       {
         for ( std::vector<pat::PackedCandidate>::const_iterator c = pcands->begin(), cend = pcands->end();
               c != cend; ++c )
         
         {
-          if ( deltaR(c->eta(), c->phi(), cand->eta(), cand->phi()) > 0.02 )
-            continue;
-
-          if ( c->bestTrack() != nullptr ) 
-          {   
-            std::cout<<"id, pt eta, phi: "
-                     << cand->pdgId() <<", "
-                     << cand->pt() <<", "
-                     << cand->eta() <<", "
-                     << cand->phi() <<std::endl;
+          if ( (c->charge() == cand->charge()) &&
+               (deltaR(c->eta(), c->phi(), cand->eta(), cand->phi()) < 0.01) &&
+               (fabs((c->pt() - cand->pt()) / cand->pt()) < 0.1 )
+            )
+            {
+              if ( c->bestTrack() != nullptr ) 
+              {   
+                std::cout<<"id, pt eta, phi: "
+                         << cand->pdgId() <<", "
+                         << cand->pt() <<", "
+                         << cand->eta() <<", "
+                         << cand->phi() <<std::endl;
             
-            tracks.push_back(c->bestTrack());
-            ttrks.push_back((*ttb).build(c->bestTrack()));
-          }
-          
+                tracks.push_back(c->bestTrack());
+                ttrks.push_back((*ttb).build(c->bestTrack()));
+              }
+            }
+               
         }
       }
     }
-    
+   
+
 
     /*
     std::cout<< pat_muons->size() <<" pat::Muons"<<std::endl;
@@ -280,6 +291,8 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
       }    
     }
     */
+    
+   
   } 
   else 
   { // Not MC
@@ -300,7 +313,6 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
         ttrks.push_back((*ttb).build(m->innerTrack().get()));
       }      
     }
-
   }
                         
   if ( ttrks.size() < 4 )
@@ -308,8 +320,8 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
   KinematicParticleFactoryFromTransientTrack kp_factory;
   
-  float chi2 = 0.0;
-  float ndf  = 0.0;
+  double chi2 = 0.0;
+  double ndf  = 0.0;
 
   std::vector<RefCountedKinematicParticle> particles;
   std::vector<RefCountedKinematicParticle> kp_muons;
@@ -328,7 +340,7 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   
   kp_kaons.push_back(kp_factory.particle(ttrks[2], kaon_mass, chi2, ndf, kaon_sigma));
   kp_kaons.push_back(kp_factory.particle(ttrks[3], kaon_mass, chi2, ndf, kaon_sigma));
-
+  
   std::vector<reco::TransientTrack> muon_tts;
   muon_tts.push_back(ttrks[0]);
   muon_tts.push_back(ttrks[1]);
@@ -337,12 +349,13 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   {
     std::cout<<"No KalmanVertexFit"<<std::endl;
   }
-  
+
   KinematicParticleVertexFitter fitter;
   RefCountedKinematicTree vertexFitTree = fitter.fit(kp_muons);
   printout(vertexFitTree);
-
-  //KinematicConstrainedVertexFit(particles);  
+  
+  //KinematicConstrainedVertexFit(particles);
+  //KinematicConstrainedVertexFit(kp_muons);
   //KinematicParticleVertexFit(kp_muons, kp_kaons); 
   //KinematicParticleVertexFit(particles);
   
