@@ -61,8 +61,6 @@ process.source = cms.Source(
 
     # This is for AOD
     inputCommands=cms.untracked.vstring('keep *', 'drop *_muonReducedTrackExtras_*_*')
-
-
 )
 
 process.load('KinFitTester.KinFitTester.KinFitTester_cfi')
@@ -71,9 +69,17 @@ process.KinFitTester.isMC = cms.bool(True)
 process.KinFitTester.isMiniAOD = cms.bool(True)
 process.KinFitTester.ptMin = cms.double(0.8)
 
+'''
+process.out = cms.OutputModule(
+        "PoolOutputModule",
+            fileName = cms.untracked.string("BsToJPsiPhi_JPsiToMuMu_PhiToKK_MINIAODSIM.root")
+        )
+'''
+
 process.p = cms.Path(
     process.KinFitTester
 )
 
 process.schedule = cms.Schedule(process.p)
+#process.outpath = cms.EndPath(process.out)
 

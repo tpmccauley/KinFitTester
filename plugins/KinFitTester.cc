@@ -332,16 +332,18 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   /*
     The KinematicConstrainedVertexFit is the "global" strategy
   */
-  std::cout<<"*** KinematicConstrainedVertexFit ***"<<std::endl;
+  std::cout<<"kcvf * KinematicConstrainedVertexFit * kcvf"<<std::endl;
   KinematicConstrainedVertexFit(particles);
-  std::cout<<"*************************************"<<std::endl;
+  std::cout<<"kcvfkcvfkcvfkcvfkcvfkcvfkcvfkcvfkcvfkcvfkcvf"<<std::endl;
   
   /*
     The KinematicParticleVertexFit is the "sequential" strategy
   */
+  std::cout<<"kpvf * KinematicParticleVertexFit * kpvf"<<std::endl;
   //KinematicConstrainedVertexFit(kp_muons);
-  //KinematicParticleVertexFit(kp_muons, kp_kaons); 
+  KinematicParticleVertexFit(kp_muons, kp_kaons); 
   //KinematicParticleVertexFit(particles);
+  std::cout<<"kpvfkpvfkpvfkpvfkpvfkpvfkpvfkpvfkpvfkpvf"<<std::endl;
 
 }
 
@@ -474,7 +476,8 @@ void KinFitTester::KinematicParticleVertexFit(std::vector<RefCountedKinematicPar
     // The vertex fitter
     KinematicParticleVertexFitter kpv_fitter;  
     RefCountedKinematicTree tree = kpv_fitter.fit(muons);
-    printout(tree);
+    //std::cout<<"   KinematicTre from KPVF (vertex fit):"<<std::endl;
+    //printout(tree); 
 
     // The particle fitter
     KinematicParticleFitter kp_fitter;
@@ -488,7 +491,7 @@ void KinFitTester::KinematicParticleVertexFit(std::vector<RefCountedKinematicPar
 
     RefCountedKinematicTree btree = kpv_fitter.fit(kaons);
 
-    std::cout<<"KinematicTree from KPVF:"<<std::endl;
+    std::cout<<"  KinematicTree from KPVF: "<<std::endl;
     printout(btree);
   }
   catch (const std::exception& e) 
