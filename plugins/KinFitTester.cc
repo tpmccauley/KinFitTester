@@ -59,25 +59,30 @@ private:
   virtual void analyze(const edm::Event&, const edm::EventSetup&) override;
   virtual void endJob() override;
   
+  edm::InputTag recoMuonInputTag_;
   edm::InputTag patMuonInputTag_;
   edm::InputTag candidateInputTag_;
   edm::InputTag prunedGenParticleInputTag_;
   edm::InputTag packedGenParticleInputTag_;
 
   bool isMC_;
+  bool isAOD_;
+  bool isMiniAOD_;
 
   double ptMin_;
   double etaMax_;
 
+  edm::EDGetTokenT<std::vector<reco::Muon> > recoMuonToken_;
   edm::EDGetTokenT<std::vector<pat::Muon> > patMuonToken_;
   edm::EDGetTokenT<pat::PackedCandidateCollection> candidateToken_;
   edm::EDGetTokenT<reco::GenParticleCollection> prunedGenParticleToken_;
   edm::EDGetTokenT<pat::PackedGenParticleCollection> packedGenParticleToken_;
 
   bool isAncestor(const reco::Candidate* ancestor, const reco::Candidate* particle);
-  bool inKinematicAcceptanceRegion(const pat::Muon& muon);
-  bool isGoodMuon(const pat::Muon& muon);
-  bool isKalmanVertexFit(std::vector<reco::TransientTrack>);
+  bool inKinematicAcceptanceRegion(const pat::Muon&);
+  bool isGoodMuon(const pat::Muon&);
+
+  TransientVertex KalmanVertexFit(std::vector<reco::TransientTrack>);
 
   void KinematicParticleVertexFit(std::vector<RefCountedKinematicParticle>);
 
@@ -96,14 +101,18 @@ private:
 };
 
 KinFitTester::KinFitTester(const edm::ParameterSet& iConfig)
-  : patMuonInputTag_(iConfig.getParameter<edm::InputTag>("patMuonTag")),
+  : recoMuonInputTag_(iConfig.getParameter<edm::InputTag>("recoMuonTag")),      
+    patMuonInputTag_(iConfig.getParameter<edm::InputTag>("patMuonTag")),
     candidateInputTag_(iConfig.getParameter<edm::InputTag>("packedCandidateTag")),
     prunedGenParticleInputTag_(iConfig.getParameter<edm::InputTag>("prunedGenParticleTag")),
     packedGenParticleInputTag_(iConfig.getParameter<edm::InputTag>("packedGenParticleTag")),
     isMC_(iConfig.getParameter<bool>("isMC")),
+    isAOD_(iConfig.getParameter<bool>("isAOD")),
+    isMiniAOD_(iConfig.getParameter<bool>("isMiniAOD")),
     ptMin_(iConfig.getParameter<double>("ptMin")),
     etaMax_(iConfig.getParameter<double>("etaMax"))
 {
+  recoMuonToken_ = consumes<std::vector<reco::Muon> >(recoMuonInputTag_);
   patMuonToken_ = consumes<std::vector<pat::Muon> >(patMuonInputTag_);
   candidateToken_ = consumes<pat::PackedCandidateCollection>(candidateInputTag_);
   prunedGenParticleToken_ = consumes<reco::GenParticleCollection>(prunedGenParticleInputTag_);
@@ -127,35 +136,81 @@ double KinFitTester::deltaR(const double& eta1, const double& phi1,
 
 void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
 {
+  /*
+    First let's get the muons.
+    pat::Muons for miniAOD and 
+    reco::Muons for AOD.
+  */
   edm::Handle<std::vector<pat::Muon> > pat_muons;
-  iEvent.getByToken(patMuonToken_, pat_muons);
-  //std::cout<< pat_muons->size() << " pat::Muons in the event" <<std::endl;
+  edm::Handle<reco::MuonCollection> reco_muons;
 
+  if ( isMiniAOD_ ) 
+  {
+    iEvent.getByToken(patMuonToken_, pat_muons);
+
+    if ( ! pat_muons.isValid() ) {
+      std::string error = "### Error: pat::Muons "
+                          + edm::TypeID (typeid (std::vector<pat::Muon>)).friendlyClassName() + ":" 
+                          + patMuonInputTag_.label() + ":"
+                          + patMuonInputTag_.instance() + ":" 
+                          + patMuonInputTag_.process() + " are not found.";
+
+      std::cout<< error <<std::endl;
+      return;
+    }
+  } 
+  else if ( isAOD_ ) 
+  {
+    iEvent.getByToken(recoMuonToken_, reco_muons);
+    return; // Don't do anything with AOD yet
+
+    if ( ! reco_muons.isValid() )
+    {  
+      std::string error = "### Error: Muons "
+                          + edm::TypeID (typeid (reco::MuonCollection)).friendlyClassName() + ":" 
+                          + recoMuonInputTag_.label() + ":"
+                          + recoMuonInputTag_.instance() + ":" 
+                          + recoMuonInputTag_.process() + " are not found.";
+      
+      std::cout<< error <<std::endl;
+      return;
+    }      
+  } 
+  else 
+  {     
+    return;
+  }
+  
+  /* 
+     Get the TransientTrackBuilder.
+     We will build TransientTracks from 
+     reco::Tracks which in turn will be used
+     to build ReferenceCountedKinematicParticles
+     which will be the input to the fitters.
+  */
   edm::ESHandle<TransientTrackBuilder> ttb;
   iSetup.get<TransientTrackRecord>().get("TransientTrackBuilder", ttb);
 
+  std::vector<reco::TransientTrack> ttrks;
+
   edm::Handle<pat::PackedCandidateCollection> pcands;
   iEvent.getByToken(candidateToken_, pcands);
-
-  std::vector<const reco::Track*> tracks;
-  std::vector<reco::TransientTrack> ttrks;
 
   if ( isMC_ ) 
   {
     edm::Handle<reco::GenParticleCollection> pruned;
     iEvent.getByToken(prunedGenParticleToken_, pruned);
-    //std::cout<< pruned->size()<<" reco::GenParticles in the event"<<std::endl;
-
+  
     edm::Handle<pat::PackedGenParticleCollection> packed;
     iEvent.getByToken(packedGenParticleToken_, packed);
-    //std::cout<< packed->size() <<" pat::PackedGenParticles in the event"<<std::endl;
 
+    /*
+      Find the muons and kaons from the Bs
+      and fill the vector of Candidates.
+    */
     std::vector<const reco::Candidate*> cands;    
     const reco::Candidate* Bs;
-    
-    //std::cout<<"Candidates: "<<std::endl;
 
-    // Get the MC truth for the decay particles
     for ( unsigned int i = 0; i < pruned->size(); ++i )
     {
       if ( abs((*pruned)[i].pdgId()) == 531 ) // Bs0
@@ -176,46 +231,22 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
       {
         if ( abs((*packed)[j].pdgId()) == 13 || abs((*packed)[j].pdgId()) == 321 ) // muon or K+/- 
         {
-
-          /*
-          std::cout<<"id, pt eta, phi: "
-                   << (*packed)[j].pdgId() <<", "
-                   << (*packed)[j].pt() <<", "
-                   << (*packed)[j].eta() <<", "
-                   << (*packed)[j].phi() <<std::endl;
-          */
-          cands.push_back((*packed)[j].clone());              
-
-          //std::cout<< cands.size() <<std::endl;
-          
+          cands.push_back((*packed)[j].clone());          
         }            
       }     
     }
-  
+       
     /*
-      The pointer is always null so can't do this
-      
+      Muons are in vector<pat::Muon> and 
+      kaons are in vector<pat::PackedCandidate>
+      We know the truth from the Candidates so here
+      we iterate over them and match Muons and PackedCandidates.
+      When there is a match we build a TransientTrack and
+      add it to our collection.
+    */ 
     for ( auto cand: cands )
-    {
-      if ( cand->bestTrack() != nullptr ) 
-      {
-        reco::TransientTrack tt = (*ttb).build(cand->bestTrack());
-        ttrks.push_back(tt);
-      }      
-    }
-    */
-    
-   
-    if ( cands.size() != 4 )
-      return;
-
-    std::cout<<"Muons and PackedCandidates:"<<std::endl;
-
-   
-    //  Match the candidates to the Muons and PackedCandidates
-    for ( auto cand: cands )
-    {
-      if ( abs(cand->pdgId()) == 22 )
+    {        
+      if ( abs(cand->pdgId()) == 13 ) // muons
       {
         for ( std::vector<pat::Muon>::const_iterator m = pat_muons->begin(), mend = pat_muons->end();
               m != mend; ++m ) 
@@ -223,98 +254,57 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
           if ( (m->charge() == cand->charge()) &&       
                (deltaR(m->eta(), m->phi(), cand->eta(), cand->phi()) < 0.01) &&
                (fabs((m->pt() - cand->pt()) / cand->pt()) < 0.1 )  
-            )
-          {
+            ) 
+          { 
             if ( m->innerTrack().isNonnull() && 
                  isGoodMuon(*m) && 
-                 inKinematicAcceptanceRegion(*m) )
+                 inKinematicAcceptanceRegion(*m) ) 
             {
-              std::cout<<"id, pt eta, phi: "
-                       << cand->pdgId() <<", "
-                       << cand->pt() <<", "
-                       << cand->eta() <<", "
-                       << cand->phi() <<std::endl;
-            
-              tracks.push_back(m->innerTrack().get());
               ttrks.push_back((*ttb).build(m->innerTrack().get()));
-              //ttrks.push_back((*ttb).build(m->originalObject()->clone()));
             }
-          }
-          
-          
+          }  
         }
-      }
-    
-     
-      if ( abs(cand->pdgId()) == 321 || abs(cand->pdgId()) == 13 )
+      } 
+          
+      if ( abs(cand->pdgId()) == 321 ) // kaons
       {
         for ( std::vector<pat::PackedCandidate>::const_iterator c = pcands->begin(), cend = pcands->end();
-              c != cend; ++c )
-        
+              c != cend; ++c )      
         {
           if ( (c->charge() == cand->charge()) &&
                (deltaR(c->eta(), c->phi(), cand->eta(), cand->phi()) < 0.01) &&
                (fabs((c->pt() - cand->pt()) / cand->pt()) < 0.1 )
             )
-            {
-              if ( c->bestTrack() != nullptr ) 
-              {   
-                std::cout<<"id, pt eta, phi: "
-                         << cand->pdgId() <<", "
-                         << cand->pt() <<", "
-                         << cand->eta() <<", "
-                         << cand->phi() <<std::endl;
-            
-                tracks.push_back(c->bestTrack());
-                ttrks.push_back((*ttb).build(c->bestTrack()));
-              }
+          {
+            if ( c->bestTrack() != nullptr ) 
+            {               
+              ttrks.push_back((*ttb).build(c->bestTrack()));
             }
-               
+          }   
         }
       }
-    }
-   
-
-
-    /*
-    std::cout<< pat_muons->size() <<" pat::Muons"<<std::endl;
-
-    for ( std::vector<pat::Muon>::const_iterator m = pat_muons->begin(), mend = pat_muons->end();
-          m != mend; ++m ) 
-    {   
-      if ( m->innerTrack().isNonnull() && 
-           isGoodMuon(*m) && 
-           inKinematicAcceptanceRegion(*m))
-      { 
-        tracks.push_back(m->innerTrack().get());
-        ttrks.push_back((*ttb).build(m->innerTrack().get()));
-      }    
-    }
-    */
-    
-   
-  } 
+     
+    } // Iterated through the candidates
+  }  
   else 
   { // Not MC
-    
-    // If data just fill all the muons
-    // (not realistic but works in the sense that things run through)
-
-    std::cout<< pat_muons->size() <<" pat::Muons"<<std::endl;
-
+   
+    /*
+      If data just fill all the muons
+      (not realistic of course but works in the sense that things run through)
+    */
     for ( std::vector<pat::Muon>::const_iterator m = pat_muons->begin(), mend = pat_muons->end();
           m != mend; ++m ) 
-    {   
+    {     
       if ( m->innerTrack().isNonnull() &&
            isGoodMuon(*m) && 
            inKinematicAcceptanceRegion(*m))
       { 
-        tracks.push_back(m->innerTrack().get());
         ttrks.push_back((*ttb).build(m->innerTrack().get()));
       }      
     }
   }
-                        
+    
   if ( ttrks.size() < 4 )
     return;
 
@@ -331,34 +321,28 @@ void KinFitTester::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   
   particles.push_back(kp_factory.particle(ttrks[0], muon_mass, chi2, ndf, muon_sigma));
   particles.push_back(kp_factory.particle(ttrks[1], muon_mass, chi2, ndf, muon_sigma));
-
   particles.push_back(kp_factory.particle(ttrks[2], kaon_mass, chi2, ndf, kaon_sigma));
   particles.push_back(kp_factory.particle(ttrks[3], kaon_mass, chi2, ndf, kaon_sigma));
-
+ 
   kp_muons.push_back(kp_factory.particle(ttrks[0], muon_mass, chi2, ndf, muon_sigma));
   kp_muons.push_back(kp_factory.particle(ttrks[1], muon_mass, chi2, ndf, muon_sigma));
-  
   kp_kaons.push_back(kp_factory.particle(ttrks[2], kaon_mass, chi2, ndf, kaon_sigma));
   kp_kaons.push_back(kp_factory.particle(ttrks[3], kaon_mass, chi2, ndf, kaon_sigma));
   
-  std::vector<reco::TransientTrack> muon_tts;
-  muon_tts.push_back(ttrks[0]);
-  muon_tts.push_back(ttrks[1]);
-    
-  if ( ! isKalmanVertexFit(muon_tts) ) 
-  {
-    std::cout<<"No KalmanVertexFit"<<std::endl;
-  }
-
-  KinematicParticleVertexFitter fitter;
-  RefCountedKinematicTree vertexFitTree = fitter.fit(kp_muons);
-  printout(vertexFitTree);
+  /*
+    The KinematicConstrainedVertexFit is the "global" strategy
+  */
+  std::cout<<"*** KinematicConstrainedVertexFit ***"<<std::endl;
+  KinematicConstrainedVertexFit(particles);
+  std::cout<<"*************************************"<<std::endl;
   
-  //KinematicConstrainedVertexFit(particles);
+  /*
+    The KinematicParticleVertexFit is the "sequential" strategy
+  */
   //KinematicConstrainedVertexFit(kp_muons);
   //KinematicParticleVertexFit(kp_muons, kp_kaons); 
   //KinematicParticleVertexFit(particles);
-  
+
 }
 
 bool KinFitTester::isAncestor(const reco::Candidate* ancestor, const reco::Candidate* particle)
@@ -421,7 +405,7 @@ bool KinFitTester::isGoodMuon(const pat::Muon& muon)
   return true;
 }
 
-bool KinFitTester::isKalmanVertexFit(std::vector<reco::TransientTrack> tts)
+TransientVertex KinFitTester::KalmanVertexFit(std::vector<reco::TransientTrack> tts)
 {  
   KalmanVertexFitter kvf(false);
   TransientVertex tv = kvf.vertex(tts);
@@ -433,11 +417,9 @@ bool KinFitTester::isKalmanVertexFit(std::vector<reco::TransientTrack> tts)
     std::cout<<"KalmanVertexFit: "<<std::endl;
     std::cout<<"  position: " << reco::Vertex::Point(tv.position()) << std::endl;
     std::cout<<"  chi2pdof: "<< tv.normalisedChiSquared() <<std::endl; 
-    
-    return true;
   }
 
-  return false;
+  return tv;
 }
 
 void KinFitTester::KinematicConstrainedVertexFit(std::vector<RefCountedKinematicParticle> particles)
@@ -450,7 +432,7 @@ void KinFitTester::KinematicConstrainedVertexFit(std::vector<RefCountedKinematic
   {  
     RefCountedKinematicTree tree = kcv_fitter.fit(particles, constraint);
   
-    std::cout<<"KinematicTree from KCVF:"<<std::endl;
+    std::cout<<"  KinematicTree from KCVF:"<<std::endl;
     printout(tree);
   }
   catch (const std::exception& e) 
@@ -467,7 +449,7 @@ void KinFitTester::KinematicParticleVertexFit(std::vector<RefCountedKinematicPar
     KinematicParticleVertexFitter kpv_fitter;
     RefCountedKinematicTree tree = kpv_fitter.fit(particles);
   
-    std::cout<<"KinematicTree from KPVF w/o constraints"<<std::endl;
+    std::cout<<"   KinematicTree from KPVF w/o constraints"<<std::endl;
     printout(tree);
   }
   catch (const std::exception& e) 

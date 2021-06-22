@@ -2,9 +2,9 @@
 
 ## Install and run
 
-Tested in CMSSW_10_2_18
+Tested in CMSSW_10_6_10
 
-In `CMSSW_10_2_18/src`:
+In `CMSSW_10_6_10/src`:
 
 * `git clone git@github.com:tpmccauley/KinFitTester.git KinFitTester/KinFitTester`
 * `scram b`
