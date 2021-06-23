@@ -1,5 +1,7 @@
 # KinFitTester
 
+# Development has moved to [GitLab](https://gitlab.cern.ch/cms-bph/KinFitTester)
+
 ## Install and run
 
 Tested in CMSSW_10_6_10
